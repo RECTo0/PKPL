@@ -9,15 +9,15 @@ import {
 const app = initializeApp(firebaseConfig);
 const db = getFirestore(app);
 
-// ====== CONFIG ======
-const FIBO = ["0","1","2","3","5","8","13","20","40","100","?","☕"];
+// ===== CONFIG =====
+const FIBO = ["0,5","1","2","3","5","8","13","20","40","100","?","☕"];
 const ALLOW_EVERYONE_KICK = true;
 
-const FX_DURATION_MS = 4000;     // durée “unicorn + son fail” ou “perfect + sons”
-const SHUFFLE_MS = 900;          // durée animation mélange
-const DEAL_STEP_MS = 90;         // délai entre cartes deal
-const FLIP_STEP_MS = 120;        // délai entre flips
-// =====================
+const FX_DURATION_MS = 6000; // sons + effet “fail/perfect” >= 6s
+const SHUFFLE_MS = 900;
+const DEAL_STEP_MS = 90;
+const FLIP_STEP_MS = 120;
+// ==================
 
 // UI
 const joinView = document.getElementById("joinView");
@@ -38,8 +38,6 @@ const whoami = document.getElementById("whoami");
 const playersList = document.getElementById("playersList");
 const cardsEl = document.getElementById("cards");
 const resultsEl = document.getElementById("results");
-const voteHint = document.getElementById("voteHint");
-const resultHint = document.getElementById("resultHint");
 
 const revealBtn = document.getElementById("revealBtn");
 const replayBtn = document.getElementById("replayBtn");
@@ -53,22 +51,17 @@ let state = {
   playerId: null,
   name: null,
   role: null, // player | observer
-
-  // reveal locked = on ne peut plus cacher (comme tu veux)
-  revealLocked: false,
   round: 1,
-
+  revealLocked: false,
   selected: null,
   unsub: [],
-
-  // évite de rejouer les FX plusieurs fois
-  lastFxRound: null,
+  lastFxRound: null
 };
 
-let latestVotes = [];
 let latestPlayers = [];
+let latestVotes = [];
 
-// ---------- helpers ----------
+// Helpers
 function uid() {
   return crypto.randomUUID ? crypto.randomUUID() : String(Date.now()) + Math.random().toString(16).slice(2);
 }
@@ -108,14 +101,14 @@ function colorForValue(val){
   return `hsl(${hue} 70% 60% / 0.35)`;
 }
 
-// ---------- firestore refs ----------
+// Firestore refs
 function roomRef(roomId){ return doc(db, "rooms", roomId); }
 function playersCol(roomId){ return collection(db, "rooms", roomId, "players"); }
 function votesCol(roomId){ return collection(db, "rooms", roomId, "votes"); }
 function playerRef(roomId, playerId){ return doc(db, "rooms", roomId, "players", playerId); }
 function voteRef(roomId, playerId){ return doc(db, "rooms", roomId, "votes", playerId); }
 
-// ---------- view ----------
+// View
 function showRoom(roomId){
   joinView.classList.add("hidden");
   roomView.classList.remove("hidden");
@@ -132,6 +125,7 @@ function clearUnsubs(){
   state.unsub = [];
 }
 function clearFx(){ fxLayer.innerHTML = ""; }
+
 function setPills(){
   roundPill.textContent = `Round ${state.round || 1}`;
   revealPill.textContent = state.revealLocked ? "Reveal ✅" : "Reveal OFF";
@@ -139,7 +133,7 @@ function setPills(){
   revealPill.style.background = state.revealLocked ? "rgba(34,197,94,.10)" : "rgba(0,0,0,.22)";
 }
 
-// ---------- audio (WebAudio, original) ----------
+// ===== WebAudio (sons originaux, pas de sons copiés) =====
 let audioCtx = null;
 function ensureAudio(){
   if (!audioCtx) audioCtx = new (window.AudioContext || window.webkitAudioContext)();
@@ -156,44 +150,52 @@ function beep(freq=440, dur=0.08, type="sine", gain=0.05){
   o.connect(g); g.connect(audioCtx.destination);
   o.start(t); o.stop(t + dur);
 }
+
 function joinSound(){
-  // petit jingle “entrée”
-  beep(523.25, 0.07, "sine", 0.05);
-  setTimeout(()=>beep(659.25, 0.07, "sine", 0.05), 90);
+  // jingle entrée
+  beep(523.25, 0.08, "sine", 0.05);
+  setTimeout(()=>beep(659.25, 0.08, "sine", 0.05), 100);
+  setTimeout(()=>beep(783.99, 0.10, "sine", 0.05), 200);
 }
 function replaySound(){
-  // “nouvelle manche”
-  beep(392, 0.09, "triangle", 0.05);
-  setTimeout(()=>beep(523.25, 0.09, "triangle", 0.05), 120);
+  // nouvelle manche
+  beep(392, 0.10, "triangle", 0.05);
+  setTimeout(()=>beep(523.25, 0.10, "triangle", 0.05), 140);
+  setTimeout(()=>beep(659.25, 0.12, "triangle", 0.05), 280);
 }
 function suspenseTick(n){
-  // tick de countdown
   beep(420 + (3-n)*110, 0.06, "square", 0.03);
 }
-function applause(){
-  // petits “claps” (bruitage original)
-  for (let i=0;i<14;i++){
-    setTimeout(()=>beep(300+Math.random()*400, 0.03, "triangle", 0.02), i*55);
-  }
-}
-function perfectSound(){
-  beep(523.25, 0.09, "sine", 0.05);
-  setTimeout(()=>beep(659.25, 0.09, "sine", 0.05), 120);
-  setTimeout(()=>beep(783.99, 0.11, "sine", 0.06), 240);
-}
-function failSound(){
-  // “game over-ish” original (descente dramatique)
-  const notes = [440, 392, 330, 262];
-  notes.forEach((f, i) => setTimeout(()=>beep(f, 0.16, "sawtooth", 0.04), i*170));
-}
 function shuffleSound(){
-  // “riffle” léger (bruit type cartes)
-  for (let i=0;i<10;i++){
-    setTimeout(()=>beep(900 + Math.random()*900, 0.015, "square", 0.01), i*35);
+  // riffle léger
+  for (let i=0;i<12;i++){
+    setTimeout(()=>beep(900 + Math.random()*900, 0.015, "square", 0.010), i*35);
   }
 }
+function applause6s(){
+  // ~6s de claps
+  for (let i=0;i<70;i++){
+    setTimeout(()=>beep(280+Math.random()*520, 0.03, "triangle", 0.02), i*85);
+  }
+}
+function perfect6s(){
+  // motif joyeux répété ~6s
+  const seq = [523.25, 659.25, 783.99, 1046.5];
+  for(let r=0; r<6; r++){
+    seq.forEach((f, i) => setTimeout(()=>beep(f, 0.10, "sine", 0.05), r*950 + i*150));
+  }
+}
+function fail6s(){
+  // descente dramatique + buzz jusqu'à ~6s
+  const base = [440, 392, 330, 262, 220];
+  base.forEach((f, i) => setTimeout(()=>beep(f, 0.18, "sawtooth", 0.04), i*220));
+  for(let i=0; i<22; i++){
+    setTimeout(()=>beep(120 + Math.random()*40, 0.08, "square", 0.018), 1200 + i*220);
+  }
+}
+// ==============================================
 
-// ---------- FX ----------
+// FX
 function fireworks(){
   clearFx();
   const bursts = 5;
@@ -220,17 +222,56 @@ function fireworks(){
   setTimeout(clearFx, 1200);
 }
 
+function ensureDealerDeck(){
+  if (fxLayer.querySelector(".dealerDeck")) return;
+  const d = document.createElement("div");
+  d.className = "dealerDeck";
+  fxLayer.appendChild(d);
+}
+function getRect(el){
+  const r = el.getBoundingClientRect();
+  return { x: r.left + r.width/2, y: r.top + r.height/2 };
+}
+function dealerDealToTargets(targetEls){
+  ensureDealerDeck();
+  const deckEl = fxLayer.querySelector(".dealerDeck");
+  if (!deckEl) return;
+
+  const deckPos = getRect(deckEl);
+
+  targetEls.forEach((t, i) => {
+    const toPos = getRect(t);
+    const fly = document.createElement("div");
+    fly.className = "dealFly";
+    fly.style.setProperty("--x0", `${deckPos.x - 37}px`);
+    fly.style.setProperty("--y0", `${deckPos.y - 49}px`);
+    fly.style.setProperty("--x1", `${toPos.x - 37}px`);
+    fly.style.setProperty("--y1", `${toPos.y - 49}px`);
+    fly.style.animationDelay = `${i * 70}ms`;
+    document.body.appendChild(fly);
+
+    setTimeout(() => beep(900 + Math.random()*700, 0.015, "square", 0.010), i*70);
+
+    fly.addEventListener("animationend", () => fly.remove());
+  });
+}
+
 function showShuffleAnimation(){
   clearFx();
+  ensureDealerDeck();
   const deck = document.createElement("div");
   deck.className = "shuffleDeck shuffleRun";
   deck.innerHTML = `<div class="shuffleCard"></div><div class="shuffleCard"></div><div class="shuffleCard"></div>`;
   fxLayer.appendChild(deck);
   shuffleSound();
-  setTimeout(clearFx, SHUFFLE_MS);
+  setTimeout(() => {
+    // on garde le dealerDeck en place, on enlève juste le shuffle
+    const sh = fxLayer.querySelector(".shuffleDeck");
+    if (sh) sh.remove();
+  }, SHUFFLE_MS);
 }
 
-// ---------- cards (voting) ----------
+// Voting cards
 function renderCards(){
   cardsEl.innerHTML = "";
   FIBO.forEach(v => {
@@ -242,11 +283,11 @@ function renderCards(){
       <div class="mini r">${v}</div>
     `;
     c.onclick = async () => {
-      if (state.role !== "player") return;       // observateur ne vote pas
+      if (state.role !== "player") return; // observateur ne vote pas
       if (state.revealLocked) { toast("Tour terminé"); return; }
       state.selected = v;
       renderCards();
-      await castVote(v);
+      await castVote(v); // ✅ écrase le vote => on peut changer avant reveal
       toast("Vote OK");
     };
     cardsEl.appendChild(c);
@@ -258,7 +299,7 @@ async function castVote(value){
   await setDoc(playerRef(state.roomId, state.playerId), { hasVoted: true, updatedAt: serverTimestamp() }, { merge: true });
 }
 
-// ---------- join (pseudo unique dans la room) ----------
+// Join (pseudo unique)
 async function joinRoom(){
   const name = (nameInput.value || "").trim().slice(0,24);
   if (!name) { alert("Entre un pseudo."); return; }
@@ -285,7 +326,6 @@ async function joinRoom(){
   state.role = role;
   state.selected = null;
 
-  // create room if needed
   const r = roomRef(roomId);
   const snap = await getDoc(r);
   if (!snap.exists()){
@@ -308,10 +348,10 @@ async function joinRoom(){
   showRoom(roomId);
   bindRoom();
 
-  // son “début de partie / connexion”
   joinSound();
 }
 
+// Kick
 async function kickPlayer(targetId){
   if (!ALLOW_EVERYONE_KICK) return;
   if (targetId === state.playerId) return;
@@ -320,10 +360,8 @@ async function kickPlayer(targetId){
   toast("Kick");
 }
 
-// ---------- reveal / replay logic ----------
-function votedPlayersOnly(players){
-  return players.filter(p => p.role !== "observer");
-}
+// Countdown / reveal
+function votedPlayersOnly(players){ return players.filter(p => p.role !== "observer"); }
 function everyoneVoted(players){
   const voters = votedPlayersOnly(players);
   if (voters.length === 0) return false;
@@ -353,7 +391,7 @@ async function startCountdownIfNeeded(){
   if (!snap.exists()) return;
   const data = snap.data();
 
-  if (data.countdownActive || state.revealLocked) return;
+  if (data.countdownActive || data.revealLocked) return;
 
   const endsAt = Date.now() + 3200; // 3..2..1
   await updateDoc(r, { countdownActive: true, countdownEndsAt: endsAt });
@@ -375,15 +413,14 @@ async function doRevealNow(){
 
 async function revealPressed(){
   ensureAudio();
-  await doRevealNow(); // une seule fois, pas de hide
+  await doRevealNow(); // reveal une seule fois (pas de hide)
 }
 
-// tout le monde peut rejouer
 async function replayPressed(){
   ensureAudio();
   replaySound();
 
-  // reset votes
+  // delete votes
   const vs = await getDocs(votesCol(state.roomId));
   for (const v of vs.docs) await deleteDoc(v.ref);
 
@@ -404,7 +441,7 @@ async function replayPressed(){
     countdownEndsAt: null
   });
 
-  // local reset (pas de carte pré-sélectionnée)
+  // local reset
   state.selected = null;
   renderCards();
   latestVotes = [];
@@ -412,15 +449,14 @@ async function replayPressed(){
   clearFx();
   hideCountdownUI();
   state.lastFxRound = null;
-  toast("Rejouer");
+  toast("Nouveau tour");
 }
 
-// ---------- Results render (Blackjack style) ----------
+// Render results (Blackjack + Dealer deal)
 async function renderResultsBlackjack(votes){
-  // on affiche face-down puis flip une par une
   const nameById = new Map(latestPlayers.map(p => [p.id, p.name || p.id]));
 
-  // counts for duplicate color
+  // duplicates color
   const counts = new Map();
   for (const v of votes){
     const key = String(v.value ?? "—");
@@ -441,7 +477,7 @@ async function renderResultsBlackjack(votes){
 
     const card = document.createElement("div");
     card.className = "votecard deal faceDown";
-    card.style.animationDelay = `${idx*DEAL_STEP_MS}ms`;
+    card.style.animationDelay = `${idx * DEAL_STEP_MS}ms`;
 
     if (dup){
       card.style.background = colorForValue(key);
@@ -473,23 +509,26 @@ async function renderResultsBlackjack(votes){
   resultsEl.innerHTML = "";
   resultsEl.appendChild(wrap);
 
-  // flip séquentiel façon blackjack dealer
   const cards = [...wrap.querySelectorAll(".votecard")];
+
+  // Dealer deal fly
+  setTimeout(() => dealerDealToTargets(cards), 50);
+
+  // Flip sequential blackjack
   cards.forEach((c, i) => {
     setTimeout(() => {
       c.classList.remove("faceDown");
       c.classList.add("flip");
-      // petit "flip tick"
-      beep(700 + i*20, 0.03, "square", 0.01);
-    }, SHUFFLE_MS + 220 + i*FLIP_STEP_MS);
+      beep(700 + i*18, 0.03, "square", 0.01);
+    }, SHUFFLE_MS + 450 + i*FLIP_STEP_MS);
   });
 }
 
 function showUnicorn(){
-  resultsEl.innerHTML = `<div class="unicorn">🦄 <span>Désaccord… la licorne veut une discussion !</span></div>`;
+  resultsEl.innerHTML = `<div class="unicorn">🦄 <span>Pas d’accord ? La licorne exige un débat civilisé.</span></div>`;
 }
 
-// ---------- bind room ----------
+// Bind
 function renderPlayers(){
   playersList.innerHTML = "";
   latestPlayers
@@ -530,7 +569,7 @@ function renderPlayers(){
         tags.appendChild(voteTag);
       }
 
-      const canKick = (ALLOW_EVERYONE_KICK) && (p.id !== state.playerId);
+      const canKick = ALLOW_EVERYONE_KICK && (p.id !== state.playerId);
       if (canKick){
         const kb = document.createElement("button");
         kb.className = "kick";
@@ -549,8 +588,6 @@ function bindRoom(){
   clearUnsubs();
   renderCards();
 
-  voteHint.textContent = "";
-  resultHint.textContent = "";
   whoami.textContent = `${state.name} • ${state.role === "observer" ? "Observateur" : "Joueur"}`;
   roomStatus.textContent = "";
 
@@ -563,7 +600,7 @@ function bindRoom(){
     state.revealLocked = !!data.revealLocked;
     setPills();
 
-    // reveal locked => bouton reveal disable, plus de hide
+    // reveal locked => disable reveal, no hide
     revealBtn.disabled = state.revealLocked;
     revealBtn.textContent = state.revealLocked ? "Reveal ✅" : "Reveal";
 
@@ -584,38 +621,36 @@ function bindRoom(){
       hideCountdownUI();
     }
 
-    // on reset visuel quand round unlocked
+    // round unlocked => reset UI locally
     if (!state.revealLocked){
       state.selected = null;
       renderCards();
       clearFx();
       resultsEl.textContent = "En attente…";
       state.lastFxRound = null;
+      return;
     }
 
-    // reveal => jouer FX une fois par round
+    // reveal => FX once per round
     if (state.revealLocked && state.lastFxRound !== state.round){
       state.lastFxRound = state.round;
 
-      // votes des joueurs (observateurs exclus)
+      // keep only voters (exclude observers)
       const voterIds = new Set(latestPlayers.filter(p => p.role !== "observer").map(p => p.id));
       const voterVotes = latestVotes.filter(v => voterIds.has(v.id));
 
-      // shuffle avant deal
       showShuffleAnimation();
 
       if (isUnanimous(voterVotes)){
-        // perfect: fireworks + sons + applauses (durée ressentie)
-        perfectSound();
-        applause();
+        perfect6s();
+        applause6s();
         setTimeout(() => fireworks(), 220);
         setTimeout(async () => {
           await renderResultsBlackjack(voterVotes);
-        }, 60); // render + flips gérés avec délais internes
+        }, 60);
       } else {
-        // fail: unicorn + fail sound 4s -> puis render blackjack
         showUnicorn();
-        failSound();
+        fail6s();
         setTimeout(async () => {
           await renderResultsBlackjack(voterVotes);
         }, FX_DURATION_MS);
@@ -640,19 +675,22 @@ function bindRoom(){
   }));
 }
 
-// ---------- leave ----------
+// Leave
 async function leave(){
   try{ await deleteDoc(playerRef(state.roomId, state.playerId)); } catch {}
   try{ await deleteDoc(voteRef(state.roomId, state.playerId)); } catch {}
   clearUnsubs();
-  latestVotes = [];
   latestPlayers = [];
+  latestVotes = [];
   clearFx();
-  state = { roomId:null, playerId:null, name:null, role:null, revealLocked:false, round:1, selected:null, unsub:[], lastFxRound:null };
+  state = {
+    roomId:null, playerId:null, name:null, role:null,
+    round:1, revealLocked:false, selected:null, unsub:[], lastFxRound:null
+  };
   showJoin();
 }
 
-// events
+// Events
 joinBtn.onclick = joinRoom;
 revealBtn.onclick = revealPressed;
 replayBtn.onclick = replayPressed;
@@ -663,5 +701,5 @@ const params = new URLSearchParams(location.search);
 const roomFromUrl = sanitizeRoomId(params.get("room"));
 if (roomFromUrl) roomIdInput.value = roomFromUrl;
 
-// unlock audio on first interaction
+// unlock audio on first interaction (mobile/Chrome)
 window.addEventListener("pointerdown", () => { try{ ensureAudio(); }catch{} }, { once:true });
