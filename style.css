@@ -3,23 +3,23 @@
   --bg: #061a12;
   --felt: #0b4a2e;
   --felt2:#083b26;
-  --panel: rgba(255,255,255,.06);
   --text: #e8eefc;
   --muted: rgba(232,238,252,.78);
-  --line: rgba(255,255,255,.12);
 }
 
 *{ box-sizing: border-box; }
-body{ margin:0; background: radial-gradient(900px 500px at 50% 10%, rgba(255,255,255,.05), transparent 60%), var(--bg); color: var(--text); overflow-x:hidden; }
-
-.bg{
-  position:fixed; inset:-40px;
+body{
+  margin:0;
+  color: var(--text);
   background:
-    radial-gradient(1200px 600px at 10% 10%, rgba(34,197,94,.14), transparent 60%),
+    radial-gradient(1000px 600px at 50% 8%, rgba(255,255,255,.06), transparent 60%),
+    radial-gradient(900px 600px at 10% 20%, rgba(34,197,94,.14), transparent 60%),
     radial-gradient(900px 600px at 90% 20%, rgba(99,102,241,.10), transparent 60%),
-    radial-gradient(800px 600px at 50% 90%, rgba(239,68,68,.08), transparent 60%);
-  z-index:-1;
+    var(--bg);
+  overflow-x:hidden;
 }
+
+.bg{ position:fixed; inset:-40px; z-index:-1; }
 
 .top{
   display:flex; justify-content:space-between; align-items:center;
@@ -29,6 +29,7 @@ body{ margin:0; background: radial-gradient(900px 500px at 50% 10%, rgba(255,255
   background: linear-gradient(to bottom, rgba(6,26,18,.96), rgba(6,26,18,.82));
   backdrop-filter: blur(10px);
 }
+
 .brand{ display:flex; gap:10px; align-items:center; }
 .logo{ font-size: 24px; }
 .brandTitle{ font-weight: 900; letter-spacing:.2px; }
@@ -117,6 +118,7 @@ input:focus{ border-color: rgba(34,197,94,.45); box-shadow: 0 0 0 4px rgba(34,19
 }
 .cardHead{ display:flex; justify-content:space-between; align-items:baseline; gap: 10px; margin-bottom: 10px; }
 
+/* Players */
 .players{ list-style:none; margin:0; padding:0; display:flex; flex-direction:column; gap: 10px; }
 .player{
   display:flex; justify-content:space-between; align-items:center; gap: 10px;
@@ -145,6 +147,7 @@ input:focus{ border-color: rgba(34,197,94,.45); box-shadow: 0 0 0 4px rgba(34,19
   color: var(--text); cursor:pointer; font-size: 12px;
 }
 
+/* Voting cards */
 .deck{ display:flex; flex-wrap:wrap; gap: 10px; padding: 6px 2px; }
 .pcard{
   width: 72px; height: 98px; border-radius: 18px;
@@ -161,7 +164,7 @@ input:focus{ border-color: rgba(34,197,94,.45); box-shadow: 0 0 0 4px rgba(34,19
 .pcard .mini.r{ top:auto; left:auto; bottom:10px; right:10px; transform: rotate(180deg); }
 .pcard.selected{ outline: 3px solid rgba(34,197,94,.75); }
 
-/* Results = table verte casino */
+/* Results = casino table */
 .resultsCard{
   margin-top: 14px;
   position: relative;
@@ -173,24 +176,52 @@ input:focus{ border-color: rgba(34,197,94,.45); box-shadow: 0 0 0 4px rgba(34,19
   padding: 12px;
   border-radius: 16px;
   border: 1px solid rgba(255,255,255,.12);
-  background: radial-gradient(900px 500px at 50% 0%, rgba(255,255,255,.06), transparent 60%),
-              linear-gradient(180deg, rgba(11,74,46,.85), rgba(8,59,38,.82));
-  min-height: 110px;
+  background:
+    radial-gradient(900px 500px at 50% 0%, rgba(255,255,255,.06), transparent 60%),
+    linear-gradient(180deg, rgba(11,74,46,.85), rgba(8,59,38,.82));
+  min-height: 120px;
 }
 
 .fxLayer{ position:absolute; inset:0; pointer-events:none; overflow:hidden; }
 
-/* Fireworks */
-.particle{
-  position:absolute; width: 6px; height: 6px; border-radius: 999px;
-  opacity: .95; animation: burst 900ms ease-out forwards;
+/* Dealer deck */
+.dealerDeck{
+  position:absolute;
+  right: 18px;
+  bottom: 18px;
+  width: 74px;
+  height: 98px;
+  border-radius: 18px;
+  border: 1px solid rgba(255,255,255,.18);
+  background: linear-gradient(135deg, rgba(99,102,241,.18), rgba(255,255,255,.05));
+  box-shadow: 0 18px 40px rgba(0,0,0,.35);
+  opacity: .95;
 }
-@keyframes burst{
-  0%{ transform: translate(0,0) scale(1); opacity: 1; }
-  100%{ transform: translate(var(--dx), var(--dy)) scale(.6); opacity: 0; }
+.dealerDeck::after{
+  content:"";
+  position:absolute; inset:8px;
+  border-radius: 14px;
+  border: 1px dashed rgba(255,255,255,.18);
+  opacity:.7;
 }
 
-/* Shuffle animation (deck) */
+/* Flying deal cards */
+.dealFly{
+  position: fixed;
+  left: 0; top: 0;
+  width: 74px; height: 98px;
+  border-radius: 18px;
+  border: 1px solid rgba(255,255,255,.18);
+  background: linear-gradient(135deg, rgba(99,102,241,.20), rgba(255,255,255,.04));
+  box-shadow: 0 18px 40px rgba(0,0,0,.35);
+  transform: translate(var(--x0), var(--y0));
+  animation: fly 380ms cubic-bezier(.2,.85,.2,1) both;
+}
+@keyframes fly{
+  to { transform: translate(var(--x1), var(--y1)); opacity: 0; }
+}
+
+/* Shuffle animation */
 .shuffleDeck{
   position:absolute;
   left: 50%;
@@ -212,14 +243,14 @@ input:focus{ border-color: rgba(34,197,94,.45); box-shadow: 0 0 0 4px rgba(34,19
 
 .shuffleRun{ animation: shuffle 900ms cubic-bezier(.2,.85,.2,1) both; }
 @keyframes shuffle{
-  0%{ transform: translate(-50%,-50%) rotate(0deg); opacity: .0; }
+  0%{ transform: translate(-50%,-50%) rotate(0deg); opacity: 0; }
   10%{ opacity: 1; }
   35%{ transform: translate(-50%,-50%) rotate(-8deg) translateX(-30px); }
   70%{ transform: translate(-50%,-50%) rotate(8deg) translateX(30px); }
   100%{ transform: translate(-50%,-50%) rotate(0deg); opacity: 0; }
 }
 
-/* Blackjack-style deal + flip */
+/* Blackjack-style reveal */
 .votecards{
   display:flex;
   flex-wrap:wrap;
@@ -237,25 +268,35 @@ input:focus{ border-color: rgba(34,197,94,.45); box-shadow: 0 0 0 4px rgba(34,19
   0%{ transform: translateY(26px) rotate(-10deg); opacity: 0; }
   100%{ transform: translateY(0) rotate(0); opacity: 1; }
 }
+
 .votecard .inner{
   width:100%; height:100%;
   transform-style: preserve-3d;
   transform: rotateY(0deg);
 }
 .votecard.faceDown .inner{ transform: rotateY(180deg); }
-.votecard.flip .inner{
-  animation: bjFlip 520ms cubic-bezier(.2,.85,.2,1) both;
-}
+.votecard.flip .inner{ animation: bjFlip 520ms cubic-bezier(.2,.85,.2,1) both; }
 @keyframes bjFlip{
   0%{ transform: rotateY(180deg); }
   100%{ transform: rotateY(0deg); }
 }
+
 .face{ position:absolute; inset:0; display:grid; place-items:center; backface-visibility: hidden; }
 .back{ background: rgba(99,102,241,.16); transform: rotateY(180deg); font-size: 22px; }
 .front{ background: rgba(0,0,0,.12); font-size: 26px; font-weight: 900; }
 .votecard .nm{
   position:absolute; bottom: 8px; left: 10px; right: 10px;
   font-size: 12px; opacity:.85; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;
+}
+
+/* Fireworks */
+.particle{
+  position:absolute; width: 6px; height: 6px; border-radius: 999px;
+  opacity: .95; animation: burst 900ms ease-out forwards;
+}
+@keyframes burst{
+  0%{ transform: translate(0,0) scale(1); opacity: 1; }
+  100%{ transform: translate(var(--dx), var(--dy)) scale(.6); opacity: 0; }
 }
 
 /* Unicorn message */
