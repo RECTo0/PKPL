@@ -1,0 +1,113 @@
+<!doctype html>
+<html lang="fr">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>Poker Planning</title>
+  <link rel="stylesheet" href="style.css" />
+</head>
+<body>
+  <div class="bg"></div>
+
+  <header class="top">
+    <div class="brand">
+      <span class="logo">🃏</span>
+      <div>
+        <div class="brandTitle">Poker Planning</div>
+        <div class="brandSub">Sans framework</div>
+      </div>
+    </div>
+    <div class="roomhint" id="roomHint"></div>
+  </header>
+
+  <main class="container">
+    <!-- JOIN -->
+    <section class="panel" id="joinView">
+      <div class="panelHead">
+        <h1>Rejoindre une room</h1>
+        <p class="muted">Entre ton pseudo et ton rôle.</p>
+      </div>
+
+      <div class="formGrid">
+        <div class="field">
+          <label>Room ID (laisser vide pour créer)</label>
+          <input id="roomIdInput" placeholder="Saisir…" />
+        </div>
+
+        <div class="field">
+          <label>Pseudo</label>
+          <input id="nameInput" placeholder="Saisir…" maxlength="24" />
+        </div>
+
+        <div class="field">
+          <label>Rôle</label>
+          <div class="seg">
+            <label class="segItem"><input type="radio" name="role" value="player" checked> Joueur</label>
+            <label class="segItem"><input type="radio" name="role" value="observer"> Observateur</label>
+          </div>
+        </div>
+
+        <div class="field">
+          <label>&nbsp;</label>
+          <button id="joinBtn" class="btn primary">Entrer</button>
+        </div>
+      </div>
+    </section>
+
+    <!-- ROOM -->
+    <section class="panel hidden" id="roomView">
+      <div class="roomHead">
+        <div>
+          <h2 id="roomTitle">Room</h2>
+          <div class="subrow">
+            <span class="pill" id="roundPill">Round 1</span>
+            <span class="pill" id="revealPill">Reveal OFF</span>
+            <span class="pill hidden" id="countdownPill">3</span>
+          </div>
+          <p class="muted" id="roomStatus"></p>
+        </div>
+
+        <div class="actions">
+          <button id="revealBtn" class="btn primary">Reveal</button>
+          <button id="replayBtn" class="btn">Rejouer</button>
+          <button id="leaveBtn" class="btn ghost">Quitter</button>
+        </div>
+      </div>
+
+      <div class="grid">
+        <section class="card">
+          <div class="cardHead">
+            <h3>Participants</h3>
+            <div class="muted small" id="whoami"></div>
+          </div>
+          <ul id="playersList" class="players"></ul>
+        </section>
+
+        <section class="card">
+          <div class="cardHead">
+            <h3>Cartes Fibonacci</h3>
+            <div class="muted small" id="voteHint"></div>
+          </div>
+          <div class="deck" id="cards"></div>
+        </section>
+      </div>
+
+      <section class="card resultsCard">
+        <div class="cardHead">
+          <h3>Résultats</h3>
+          <div class="muted small" id="resultHint"></div>
+        </div>
+
+        <div id="fxLayer" class="fxLayer"></div>
+        <div id="results" class="results muted">En attente…</div>
+      </section>
+    </section>
+  </main>
+
+  <div class="toast hidden" id="toast"></div>
+
+  <footer class="footer muted">Poker Planning</footer>
+
+  <script type="module" src="app.js"></script>
+</body>
+</html>
