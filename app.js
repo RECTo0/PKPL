@@ -13,12 +13,10 @@ const db = getFirestore(app);
 const FIBO = ["0","1","2","3","5","8","13","20","40","100","?","☕"];
 const ALLOW_EVERYONE_KICK = true;
 
-// présence
-const HEARTBEAT_MS = 10_000;
-const OFFLINE_AFTER_MS = 25_000;
-
-// FX durée
-const FX_DURATION_MS = 4000;
+const FX_DURATION_MS = 4000;     // durée “unicorn + son fail” ou “perfect + sons”
+const SHUFFLE_MS = 900;          // durée animation mélange
+const DEAL_STEP_MS = 90;         // délai entre cartes deal
+const FLIP_STEP_MS = 120;        // délai entre flips
 // =====================
 
 // UI
@@ -55,23 +53,22 @@ let state = {
   playerId: null,
   name: null,
   role: null, // player | observer
-  isFacilitator: false, // on garde pour “Rejouer” (reset)
-  facilitatorId: null,
 
-  revealed: false,
+  // reveal locked = on ne peut plus cacher (comme tu veux)
   revealLocked: false,
   round: 1,
 
   selected: null,
   unsub: [],
-  heartbeatTimer: null,
 
-  lastRoundRendered: null, // pour éviter multi-fx
+  // évite de rejouer les FX plusieurs fois
+  lastFxRound: null,
 };
 
 let latestVotes = [];
 let latestPlayers = [];
 
+// ---------- helpers ----------
 function uid() {
   return crypto.randomUUID ? crypto.randomUUID() : String(Date.now()) + Math.random().toString(16).slice(2);
 }
@@ -106,24 +103,19 @@ function avatarStyle(name){
     border: `hsl(${hue} 70% 60% / .35)`
   };
 }
-
-// Colors for duplicated vote values
 function colorForValue(val){
   const hue = hashToHue(String(val));
   return `hsl(${hue} 70% 60% / 0.35)`;
 }
 
-// Firestore refs
+// ---------- firestore refs ----------
 function roomRef(roomId){ return doc(db, "rooms", roomId); }
 function playersCol(roomId){ return collection(db, "rooms", roomId, "players"); }
 function votesCol(roomId){ return collection(db, "rooms", roomId, "votes"); }
-function statsCol(roomId){ return collection(db, "rooms", roomId, "stats"); }
-
 function playerRef(roomId, playerId){ return doc(db, "rooms", roomId, "players", playerId); }
 function voteRef(roomId, playerId){ return doc(db, "rooms", roomId, "votes", playerId); }
-function statRef(roomId, playerId){ return doc(db, "rooms", roomId, "stats", playerId); }
 
-// View
+// ---------- view ----------
 function showRoom(roomId){
   joinView.classList.add("hidden");
   roomView.classList.remove("hidden");
@@ -140,14 +132,20 @@ function clearUnsubs(){
   state.unsub = [];
 }
 function clearFx(){ fxLayer.innerHTML = ""; }
+function setPills(){
+  roundPill.textContent = `Round ${state.round || 1}`;
+  revealPill.textContent = state.revealLocked ? "Reveal ✅" : "Reveal OFF";
+  revealPill.style.borderColor = state.revealLocked ? "rgba(34,197,94,.35)" : "rgba(255,255,255,.14)";
+  revealPill.style.background = state.revealLocked ? "rgba(34,197,94,.10)" : "rgba(0,0,0,.22)";
+}
 
-// ===== WebAudio (no copyrighted sounds) =====
+// ---------- audio (WebAudio, original) ----------
 let audioCtx = null;
 function ensureAudio(){
   if (!audioCtx) audioCtx = new (window.AudioContext || window.webkitAudioContext)();
   if (audioCtx.state === "suspended") audioCtx.resume();
 }
-function beep(freq=440, dur=0.09, type="sine", gain=0.05){
+function beep(freq=440, dur=0.08, type="sine", gain=0.05){
   ensureAudio();
   const t = audioCtx.currentTime;
   const o = audioCtx.createOscillator();
@@ -158,61 +156,51 @@ function beep(freq=440, dur=0.09, type="sine", gain=0.05){
   o.connect(g); g.connect(audioCtx.destination);
   o.start(t); o.stop(t + dur);
 }
-function drumroll(duration=0.9){
-  ensureAudio();
-  const t = audioCtx.currentTime;
-  const bufferSize = 2 * audioCtx.sampleRate;
-  const noiseBuffer = audioCtx.createBuffer(1, bufferSize, audioCtx.sampleRate);
-  const output = noiseBuffer.getChannelData(0);
-  for (let i=0; i<bufferSize; i++) output[i] = Math.random()*2 - 1;
-
-  const noise = audioCtx.createBufferSource();
-  noise.buffer = noiseBuffer;
-
-  const filter = audioCtx.createBiquadFilter();
-  filter.type = "bandpass";
-  filter.frequency.value = 900;
-
-  const g = audioCtx.createGain();
-  g.gain.setValueAtTime(0.001, t);
-  g.gain.exponentialRampToValueAtTime(0.08, t + 0.15);
-  g.gain.exponentialRampToValueAtTime(0.02, t + duration);
-
-  noise.connect(filter); filter.connect(g); g.connect(audioCtx.destination);
-  noise.start(t);
-  noise.stop(t + duration);
+function joinSound(){
+  // petit jingle “entrée”
+  beep(523.25, 0.07, "sine", 0.05);
+  setTimeout(()=>beep(659.25, 0.07, "sine", 0.05), 90);
 }
-function applause(duration=1.1){
-  // noise “claps” rapides
-  ensureAudio();
-  const t0 = audioCtx.currentTime;
-  for (let i=0; i<18; i++){
-    const dt = i * (duration/18);
-    const freq = 400 + Math.random()*300;
-    beep(freq, 0.03, "triangle", 0.03);
-    setTimeout(() => beep(freq+80, 0.03, "triangle", 0.02), (dt*1000)+30);
+function replaySound(){
+  // “nouvelle manche”
+  beep(392, 0.09, "triangle", 0.05);
+  setTimeout(()=>beep(523.25, 0.09, "triangle", 0.05), 120);
+}
+function suspenseTick(n){
+  // tick de countdown
+  beep(420 + (3-n)*110, 0.06, "square", 0.03);
+}
+function applause(){
+  // petits “claps” (bruitage original)
+  for (let i=0;i<14;i++){
+    setTimeout(()=>beep(300+Math.random()*400, 0.03, "triangle", 0.02), i*55);
   }
 }
 function perfectSound(){
-  // montée joyeuse
-  beep(523.25, 0.10, "sine", 0.05);
-  setTimeout(() => beep(659.25, 0.10, "sine", 0.05), 120);
-  setTimeout(() => beep(783.99, 0.12, "sine", 0.06), 240);
+  beep(523.25, 0.09, "sine", 0.05);
+  setTimeout(()=>beep(659.25, 0.09, "sine", 0.05), 120);
+  setTimeout(()=>beep(783.99, 0.11, "sine", 0.06), 240);
 }
-function gameOverSound(){
-  // descente dramatique (style “fail”, mais original)
+function failSound(){
+  // “game over-ish” original (descente dramatique)
   const notes = [440, 392, 330, 262];
-  notes.forEach((f, i) => setTimeout(() => beep(f, 0.16, "sawtooth", 0.04), i*170));
+  notes.forEach((f, i) => setTimeout(()=>beep(f, 0.16, "sawtooth", 0.04), i*170));
+}
+function shuffleSound(){
+  // “riffle” léger (bruit type cartes)
+  for (let i=0;i<10;i++){
+    setTimeout(()=>beep(900 + Math.random()*900, 0.015, "square", 0.01), i*35);
+  }
 }
 
-// ===== FX =====
+// ---------- FX ----------
 function fireworks(){
   clearFx();
   const bursts = 5;
   const particlesPerBurst = 24;
   for (let b=0; b<bursts; b++){
-    const ox = 18 + Math.random()*64; // %
-    const oy = 18 + Math.random()*55; // %
+    const ox = 18 + Math.random()*64;
+    const oy = 18 + Math.random()*55;
     for (let i=0; i<particlesPerBurst; i++){
       const p = document.createElement("div");
       p.className = "particle";
@@ -232,7 +220,17 @@ function fireworks(){
   setTimeout(clearFx, 1200);
 }
 
-// ===== Cards UI =====
+function showShuffleAnimation(){
+  clearFx();
+  const deck = document.createElement("div");
+  deck.className = "shuffleDeck shuffleRun";
+  deck.innerHTML = `<div class="shuffleCard"></div><div class="shuffleCard"></div><div class="shuffleCard"></div>`;
+  fxLayer.appendChild(deck);
+  shuffleSound();
+  setTimeout(clearFx, SHUFFLE_MS);
+}
+
+// ---------- cards (voting) ----------
 function renderCards(){
   cardsEl.innerHTML = "";
   FIBO.forEach(v => {
@@ -244,8 +242,8 @@ function renderCards(){
       <div class="mini r">${v}</div>
     `;
     c.onclick = async () => {
-      if (state.role !== "player") return;
-      if (state.revealLocked) { toast("Tour verrouillé"); return; }
+      if (state.role !== "player") return;       // observateur ne vote pas
+      if (state.revealLocked) { toast("Tour terminé"); return; }
       state.selected = v;
       renderCards();
       await castVote(v);
@@ -260,22 +258,7 @@ async function castVote(value){
   await setDoc(playerRef(state.roomId, state.playerId), { hasVoted: true, updatedAt: serverTimestamp() }, { merge: true });
 }
 
-// ===== Presence heartbeat =====
-async function heartbeat(){
-  if (!state.roomId || !state.playerId) return;
-  await setDoc(playerRef(state.roomId, state.playerId), { lastSeen: Date.now() }, { merge: true });
-}
-function startHeartbeat(){
-  stopHeartbeat();
-  heartbeat(); // now
-  state.heartbeatTimer = setInterval(heartbeat, HEARTBEAT_MS);
-}
-function stopHeartbeat(){
-  if (state.heartbeatTimer) clearInterval(state.heartbeatTimer);
-  state.heartbeatTimer = null;
-}
-
-// ===== Join with unique name =====
+// ---------- join (pseudo unique dans la room) ----------
 async function joinRoom(){
   const name = (nameInput.value || "").trim().slice(0,24);
   if (!name) { alert("Entre un pseudo."); return; }
@@ -283,20 +266,18 @@ async function joinRoom(){
   let roomId = sanitizeRoomId(roomIdInput.value);
   if (!roomId) roomId = "room-" + Math.random().toString(36).slice(2,8);
 
-  const role = getRole();
-  const playerId = uid();
-
-  // Check unique pseudo (among active players)
+  // pseudo unique
   const ps = await getDocs(playersCol(roomId));
-  const now = Date.now();
   for (const d of ps.docs){
     const p = d.data();
-    const alive = (p.lastSeen && (now - p.lastSeen) < OFFLINE_AFTER_MS);
-    if (alive && (p.name || "").toLowerCase() === name.toLowerCase()){
-      alert("Ce pseudo est déjà utilisé dans cette room. Choisis un autre.");
+    if ((p.name || "").toLowerCase() === name.toLowerCase()){
+      alert("Pseudo déjà utilisé dans cette room. Choisis un autre.");
       return;
     }
   }
+
+  const role = getRole();
+  const playerId = uid();
 
   state.roomId = roomId;
   state.playerId = playerId;
@@ -304,139 +285,111 @@ async function joinRoom(){
   state.role = role;
   state.selected = null;
 
-  // Create room if needed
+  // create room if needed
   const r = roomRef(roomId);
   const snap = await getDoc(r);
-
   if (!snap.exists()){
     await setDoc(r, {
       createdAt: serverTimestamp(),
-      revealed: false,
       revealLocked: false,
-      revealBy: null,
-      revealAt: null,
-      facilitatorId: playerId,
       round: 1,
       countdownActive: false,
       countdownEndsAt: null
     });
-    state.isFacilitator = true;
-    state.facilitatorId = playerId;
     state.round = 1;
   } else {
-    const data = snap.data();
-    state.facilitatorId = data.facilitatorId;
-    state.isFacilitator = data.facilitatorId === playerId;
-    state.round = data.round || 1;
+    state.round = snap.data().round || 1;
   }
 
   await setDoc(playerRef(roomId, playerId), {
-    name,
-    role,
-    hasVoted: false,
-    lastSeen: Date.now()
+    name, role, hasVoted: false, joinedAt: Date.now()
   }, { merge: true });
 
   showRoom(roomId);
-  startHeartbeat();
   bindRoom();
+
+  // son “début de partie / connexion”
+  joinSound();
 }
 
 async function kickPlayer(targetId){
-  if (!ALLOW_EVERYONE_KICK && !state.isFacilitator) return;
+  if (!ALLOW_EVERYONE_KICK) return;
   if (targetId === state.playerId) return;
   try { await deleteDoc(voteRef(state.roomId, targetId)); } catch {}
   try { await deleteDoc(playerRef(state.roomId, targetId)); } catch {}
   toast("Kick");
 }
 
-// ===== Round / Reveal logic =====
-function setPills(){
-  roundPill.textContent = `Round ${state.round || 1}`;
-  revealPill.textContent = state.revealed ? "Reveal ON" : "Reveal OFF";
-  revealPill.style.borderColor = state.revealed ? "rgba(34,197,94,.35)" : "rgba(255,255,255,.14)";
-  revealPill.style.background = state.revealed ? "rgba(34,197,94,.10)" : "rgba(0,0,0,.18)";
-}
-
-function activePlayersOnly(players){
-  const now = Date.now();
-  return players.filter(p => p.lastSeen && (now - p.lastSeen) < OFFLINE_AFTER_MS);
-}
-
+// ---------- reveal / replay logic ----------
 function votedPlayersOnly(players){
   return players.filter(p => p.role !== "observer");
 }
-
 function everyoneVoted(players){
   const voters = votedPlayersOnly(players);
   if (voters.length === 0) return false;
   return voters.every(p => p.hasVoted);
 }
+function isUnanimous(votes){
+  const vals = votes.map(v => String(v.value ?? "—"));
+  return vals.length > 0 && new Set(vals).size === 1;
+}
 
 function countdownUI(n){
   countdownPill.textContent = String(n);
   countdownPill.classList.remove("hidden");
+  suspenseTick(n);
 }
 function hideCountdownUI(){
   countdownPill.classList.add("hidden");
+  countdownPill._last = null;
 }
 
 async function startCountdownIfNeeded(){
-  // trigger only when all voted and reveal not yet locked
   if (state.revealLocked) return;
-
-  const active = activePlayersOnly(latestPlayers);
-  if (!everyoneVoted(active)) return;
+  if (!everyoneVoted(latestPlayers)) return;
 
   const r = roomRef(state.roomId);
   const snap = await getDoc(r);
   if (!snap.exists()) return;
   const data = snap.data();
 
-  if (data.countdownActive || data.revealLocked) return;
+  if (data.countdownActive || state.revealLocked) return;
 
-  // start a 3s countdown for everyone
-  const endsAt = Date.now() + 3200;
+  const endsAt = Date.now() + 3200; // 3..2..1
   await updateDoc(r, { countdownActive: true, countdownEndsAt: endsAt });
 }
 
-async function doRevealNow(triggeredBy){
+async function doRevealNow(){
   const r = roomRef(state.roomId);
   const snap = await getDoc(r);
   if (!snap.exists()) return;
   const data = snap.data();
-  if (data.revealLocked) return; // already revealed once
+  if (data.revealLocked) return;
 
   await updateDoc(r, {
-    revealed: true,
     revealLocked: true,
-    revealBy: triggeredBy || null,
-    revealAt: Date.now(),
     countdownActive: false,
     countdownEndsAt: null
   });
 }
 
-// button reveal: immediate reveal (but no hide)
 async function revealPressed(){
   ensureAudio();
-  await doRevealNow(state.playerId);
+  await doRevealNow(); // une seule fois, pas de hide
 }
 
-// replay: new round (facilitator only, sinon trop chaos)
-async function replay(){
-  if (!state.isFacilitator){
-    toast("Rejouer: facilitateur");
-    return;
-  }
+// tout le monde peut rejouer
+async function replayPressed(){
+  ensureAudio();
+  replaySound();
 
-  // delete votes
+  // reset votes
   const vs = await getDocs(votesCol(state.roomId));
   for (const v of vs.docs) await deleteDoc(v.ref);
 
   // reset players hasVoted
   const ps = await getDocs(playersCol(state.roomId));
-  for (const p of ps.docs) {
+  for (const p of ps.docs){
     await updateDoc(p.ref, { hasVoted: false });
   }
 
@@ -445,119 +398,29 @@ async function replay(){
   const nextRound = (rSnap.exists() ? (rSnap.data().round || 1) : 1) + 1;
 
   await updateDoc(roomRef(state.roomId), {
-    revealed: false,
     revealLocked: false,
-    revealBy: null,
-    revealAt: null,
+    round: nextRound,
     countdownActive: false,
-    countdownEndsAt: null,
-    round: nextRound
+    countdownEndsAt: null
   });
 
-  // local reset
+  // local reset (pas de carte pré-sélectionnée)
   state.selected = null;
   renderCards();
   latestVotes = [];
   resultsEl.textContent = "En attente…";
   clearFx();
   hideCountdownUI();
-  toast("Nouveau tour");
+  state.lastFxRound = null;
+  toast("Rejouer");
 }
 
-// ===== Stats badges =====
-function parseVoteToNumber(v){
-  // keep numeric only (ignore ? and ☕)
-  const n = Number(v);
-  return Number.isFinite(n) ? n : null;
-}
-function median(nums){
-  const a = [...nums].sort((x,y)=>x-y);
-  const m = Math.floor(a.length/2);
-  return a.length % 2 ? a[m] : (a[m-1]+a[m])/2;
-}
+// ---------- Results render (Blackjack style) ----------
+async function renderResultsBlackjack(votes){
+  // on affiche face-down puis flip une par une
+  const nameById = new Map(latestPlayers.map(p => [p.id, p.name || p.id]));
 
-async function updateStatsIfFacilitator(votes, players){
-  if (!state.isFacilitator) return;
-
-  const active = activePlayersOnly(players);
-  const voterIds = active.filter(p => p.role !== "observer").map(p => p.id);
-
-  // map id->value
-  const byId = new Map(votes.map(v => [v.id, v.value]));
-  const numericVotes = [];
-  const numericById = new Map();
-
-  for (const id of voterIds){
-    const val = byId.get(id);
-    const n = parseVoteToNumber(val);
-    if (n !== null){
-      numericVotes.push(n);
-      numericById.set(id, n);
-    }
-  }
-  if (numericVotes.length === 0) return;
-
-  const med = median(numericVotes);
-
-  // closest-to-median = “Zen” point
-  let bestDiff = Infinity;
-  const diffs = new Map();
-  for (const [id, n] of numericById.entries()){
-    const d = Math.abs(n - med);
-    diffs.set(id, d);
-    if (d < bestDiff) bestDiff = d;
-  }
-  const zenWinners = [...diffs.entries()].filter(([,d])=>d===bestDiff).map(([id])=>id);
-
-  // update aggregates
-  for (const id of voterIds){
-    const sref = statRef(state.roomId, id);
-    const snap = await getDoc(sref);
-    const cur = snap.exists() ? snap.data() : { rounds: 0, sum: 0, zen: 0 };
-
-    const n = numericById.get(id);
-    const addSum = (n !== undefined) ? n : 0;
-
-    await setDoc(sref, {
-      rounds: (cur.rounds || 0) + 1,
-      sum: (cur.sum || 0) + addSum,
-      zen: (cur.zen || 0) + (zenWinners.includes(id) ? 1 : 0),
-      updatedAt: Date.now()
-    }, { merge: true });
-  }
-}
-
-async function computeBadges(players){
-  const active = activePlayersOnly(players).filter(p => p.role !== "observer");
-  const snaps = await getDocs(statsCol(state.roomId));
-  const stats = new Map();
-  snaps.forEach(d => stats.set(d.id, d.data()));
-
-  let zenBest = -1, zenId = null;
-  let lowBest = Infinity, lowId = null;
-
-  for (const p of active){
-    const s = stats.get(p.id);
-    if (!s || !(s.rounds>0)) continue;
-    const zen = s.zen || 0;
-    const avg = (s.sum || 0) / (s.rounds || 1);
-
-    if (zen > zenBest){ zenBest = zen; zenId = p.id; }
-    if (avg < lowBest){ lowBest = avg; lowId = p.id; }
-  }
-
-  return { zenId, lowId };
-}
-
-// ===== Results render + FX logic =====
-async function renderResultsFromVotes(votes){
-  if (!state.revealLocked) return;
-
-  // build name map
-  const active = activePlayersOnly(latestPlayers);
-  const nameById = new Map(active.map(p => [p.id, p.name || p.id]));
-
-  // counts for duplicate coloring
+  // counts for duplicate color
   const counts = new Map();
   for (const v of votes){
     const key = String(v.value ?? "—");
@@ -574,20 +437,19 @@ async function renderResultsFromVotes(votes){
   sorted.forEach((v, idx) => {
     const val = v.value ?? "—";
     const key = String(val);
-    const n = counts.get(key) || 0;
+    const dup = (counts.get(key) || 0) >= 2;
 
     const card = document.createElement("div");
-    card.className = "votecard deal";
-    card.style.animationDelay = `${idx*55}ms`;
+    card.className = "votecard deal faceDown";
+    card.style.animationDelay = `${idx*DEAL_STEP_MS}ms`;
 
-    if (n >= 2){
+    if (dup){
       card.style.background = colorForValue(key);
       card.style.borderColor = "rgba(255,255,255,.22)";
     }
 
     const inner = document.createElement("div");
     inner.className = "inner";
-    inner.style.animationDelay = `${120 + idx*55}ms`;
 
     const back = document.createElement("div");
     back.className = "face back";
@@ -610,66 +472,27 @@ async function renderResultsFromVotes(votes){
 
   resultsEl.innerHTML = "";
   resultsEl.appendChild(wrap);
-}
 
-function onlyVoterVotes(votes, players){
-  const voterIds = new Set(players.filter(p => p.role !== "observer").map(p => p.id));
-  return votes.filter(v => voterIds.has(v.id));
-}
-
-function isUnanimous(votes){
-  const vals = votes.map(v => String(v.value ?? "—"));
-  if (vals.length === 0) return false;
-  return new Set(vals).size === 1;
+  // flip séquentiel façon blackjack dealer
+  const cards = [...wrap.querySelectorAll(".votecard")];
+  cards.forEach((c, i) => {
+    setTimeout(() => {
+      c.classList.remove("faceDown");
+      c.classList.add("flip");
+      // petit "flip tick"
+      beep(700 + i*20, 0.03, "square", 0.01);
+    }, SHUFFLE_MS + 220 + i*FLIP_STEP_MS);
+  });
 }
 
 function showUnicorn(){
-  resultsEl.innerHTML = `<div class="unicorn">🦄 <span>Désaccord détecté… la licorne réclame une discussion.</span></div>`;
+  resultsEl.innerHTML = `<div class="unicorn">🦄 <span>Désaccord… la licorne veut une discussion !</span></div>`;
 }
 
-async function handleRevealOnce(){
-  // prevent replaying fx for same round
-  if (state.lastRoundRendered === state.round) return;
-  state.lastRoundRendered = state.round;
-
-  const active = activePlayersOnly(latestPlayers);
-  const voterVotes = onlyVoterVotes(latestVotes, active);
-
-  // update stats (facilitator) once reveal happens
-  await updateStatsIfFacilitator(voterVotes, active);
-
-  // badges compute
-  const badges = await computeBadges(active);
-
-  // update participant badges in UI rendering (stored in state)
-  state._badges = badges;
-
-  // all voted same?
-  if (isUnanimous(voterVotes)){
-    fireworks();
-    perfectSound();
-    applause();
-    // show results immediately (and keep fx feeling)
-    await renderResultsFromVotes(voterVotes);
-    setTimeout(() => {}, FX_DURATION_MS);
-  } else {
-    // show unicorn + game over sound for 4s, then results
-    showUnicorn();
-    gameOverSound();
-    setTimeout(async () => {
-      await renderResultsFromVotes(voterVotes);
-    }, FX_DURATION_MS);
-  }
-}
-
-// ===== Bind room listeners =====
+// ---------- bind room ----------
 function renderPlayers(){
-  const now = Date.now();
-  const active = latestPlayers.filter(p => p.lastSeen && (now - p.lastSeen) < OFFLINE_AFTER_MS);
-  const badges = state._badges || { zenId: null, lowId: null };
-
   playersList.innerHTML = "";
-  active
+  latestPlayers
     .sort((a,b) => (a.name||"").localeCompare(b.name||""))
     .forEach(p => {
       const li = document.createElement("li");
@@ -707,21 +530,7 @@ function renderPlayers(){
         tags.appendChild(voteTag);
       }
 
-      // badges fun
-      if (p.id === badges.zenId){
-        const z = document.createElement("span");
-        z.className = "tag";
-        z.textContent = "🧘 Estimateur Zen";
-        tags.appendChild(z);
-      }
-      if (p.id === badges.lowId){
-        const l = document.createElement("span");
-        l.className = "tag";
-        l.textContent = "⬇️ Toujours plus bas";
-        tags.appendChild(l);
-      }
-
-      const canKick = (ALLOW_EVERYONE_KICK || state.isFacilitator) && (p.id !== state.playerId);
+      const canKick = (ALLOW_EVERYONE_KICK) && (p.id !== state.playerId);
       if (canKick){
         const kb = document.createElement("button");
         kb.className = "kick";
@@ -742,103 +551,111 @@ function bindRoom(){
 
   voteHint.textContent = "";
   resultHint.textContent = "";
-
   whoami.textContent = `${state.name} • ${state.role === "observer" ? "Observateur" : "Joueur"}`;
+  roomStatus.textContent = "";
 
-  // Room state
+  // room
   state.unsub.push(onSnapshot(roomRef(state.roomId), async (d) => {
     if (!d.exists()) return;
     const data = d.data();
 
     state.round = data.round || 1;
-    state.facilitatorId = data.facilitatorId;
-
-    state.revealed = !!data.revealed;
     state.revealLocked = !!data.revealLocked;
-
     setPills();
 
-    // Reveal button behavior: once locked => disabled (no hide)
+    // reveal locked => bouton reveal disable, plus de hide
     revealBtn.disabled = state.revealLocked;
     revealBtn.textContent = state.revealLocked ? "Reveal ✅" : "Reveal";
 
-    // Rejouer visible, mais action = facilitateur
-    replayBtn.disabled = !state.isFacilitator;
-
-    // countdown display
+    // countdown
     if (data.countdownActive && data.countdownEndsAt){
       const remaining = Math.max(0, data.countdownEndsAt - Date.now());
       const n = Math.ceil(remaining / 1000);
-      countdownUI(Math.min(3, Math.max(1, n)));
-      // suspense sounds when countdown is active
-      // (avoid spamming: tick only when number changes)
-      if (countdownPill._last !== n){
-        countdownPill._last = n;
-        drumroll(0.18);
-        beep(440 + (3-n)*90, 0.06, "square", 0.03);
+      const shown = Math.min(3, Math.max(1, n));
+      if (countdownPill._last !== shown){
+        countdownPill._last = shown;
+        countdownUI(shown);
       }
       if (remaining <= 0){
         hideCountdownUI();
-        // auto reveal at end
-        await doRevealNow(null);
+        await doRevealNow();
       }
     } else {
       hideCountdownUI();
     }
 
-    // On new round / unlocked, clear selection everywhere
+    // on reset visuel quand round unlocked
     if (!state.revealLocked){
       state.selected = null;
       renderCards();
       clearFx();
       resultsEl.textContent = "En attente…";
-      state.lastRoundRendered = null;
+      state.lastFxRound = null;
     }
 
-    // When reveal happens: run fx once
-    if (state.revealLocked){
-      await handleRevealOnce();
+    // reveal => jouer FX une fois par round
+    if (state.revealLocked && state.lastFxRound !== state.round){
+      state.lastFxRound = state.round;
+
+      // votes des joueurs (observateurs exclus)
+      const voterIds = new Set(latestPlayers.filter(p => p.role !== "observer").map(p => p.id));
+      const voterVotes = latestVotes.filter(v => voterIds.has(v.id));
+
+      // shuffle avant deal
+      showShuffleAnimation();
+
+      if (isUnanimous(voterVotes)){
+        // perfect: fireworks + sons + applauses (durée ressentie)
+        perfectSound();
+        applause();
+        setTimeout(() => fireworks(), 220);
+        setTimeout(async () => {
+          await renderResultsBlackjack(voterVotes);
+        }, 60); // render + flips gérés avec délais internes
+      } else {
+        // fail: unicorn + fail sound 4s -> puis render blackjack
+        showUnicorn();
+        failSound();
+        setTimeout(async () => {
+          await renderResultsBlackjack(voterVotes);
+        }, FX_DURATION_MS);
+      }
     }
   }));
 
-  // Players
+  // players
   state.unsub.push(onSnapshot(playersCol(state.roomId), (qs) => {
     const players = [];
     qs.forEach(docu => players.push({ id: docu.id, ...docu.data() }));
     latestPlayers = players;
     renderPlayers();
-
-    // start countdown automatically when everyone voted (observers excluded)
     startCountdownIfNeeded();
   }));
 
-  // Votes
+  // votes
   state.unsub.push(onSnapshot(votesCol(state.roomId), (qs) => {
     const votes = [];
     qs.forEach(docu => votes.push({ id: docu.id, ...docu.data() }));
     latestVotes = votes;
-
-    // If everyone voted, we can auto-countdown (handled via players snapshot)
   }));
 }
 
-// ===== Buttons =====
+// ---------- leave ----------
 async function leave(){
-  stopHeartbeat();
   try{ await deleteDoc(playerRef(state.roomId, state.playerId)); } catch {}
   try{ await deleteDoc(voteRef(state.roomId, state.playerId)); } catch {}
   clearUnsubs();
   latestVotes = [];
   latestPlayers = [];
   clearFx();
-  state = { ...state, roomId:null, playerId:null, name:null, role:null, isFacilitator:false, facilitatorId:null,
-           revealed:false, revealLocked:false, round:1, selected:null, unsub:[], heartbeatTimer:null, lastRoundRendered:null };
+  state = { roomId:null, playerId:null, name:null, role:null, revealLocked:false, round:1, selected:null, unsub:[], lastFxRound:null };
   showJoin();
 }
 
+// events
 joinBtn.onclick = joinRoom;
 revealBtn.onclick = revealPressed;
-replayBtn.onclick = replay;
+replayBtn.onclick = replayPressed;
 leaveBtn.onclick = leave;
 
 // URL ?room=
